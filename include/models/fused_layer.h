@@ -5,6 +5,7 @@
 #include <cuda.h>
 
 #include "layer.h"
+#include "fp16_dev.h"
 
 class Conv2dBiasReLU: public Layer
 {
@@ -68,9 +69,20 @@ class Conv2dBiasReLU: public Layer
         int getFwdConvPaddedImageDim(int tensorDim, int pad);
         int getFwdConvOutputDim(int tensorDim, int pad, int filterDim, int stride, int dilation);
         
+        /* fp16 copy tensors for mixed precision */
+        half1 *_input_fp16_h = nullptr;
+        half1 *_input_fp16_d = nullptr;
+
+        half1 *_weight_fp16_d = nullptr;
+        half1 *_bias_fp16_d = nullptr;
+        half1 *_grad_weight_fp16_d = nullptr;
+        half1 *_grad_bias_fp16_d = nullptr;
+
+        
         /* Forward results - NHWC layout */
-        float *_after_conv_bias_d = nullptr;  //activation input used for BP
-        float *_fusion_output_d = nullptr;
+        half1 *_after_conv_bias_fp16_d = nullptr;  //activation input used for BP
+        half1 *_fusion_output_fp16_d = nullptr;
+
 
         /* Backward results - NHWC layout */
         float *_dx_d = nullptr;
@@ -81,4 +93,5 @@ class Conv2dBiasReLU: public Layer
         Conv2dBiasReLU(std::string layer_name, int in_channels, int out_channels, int kernel_size, int stride=1, int padding=0, int dilation=1);
         virtual ImageDto Forward(ImageDto &data);
         virtual ImageDto Backward(ImageDto &data, int *labels);
+
 };
