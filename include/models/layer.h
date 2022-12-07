@@ -92,60 +92,6 @@ class Layer
         virtual ImageDto Backward(ImageDto &data, int *labels) = 0;
 };
 
-// class Conv2dBiasReLU: public Layer
-// {
-//     private:
-//         cudnnBackendDescriptor_t convDesc, pointWiseAdd, biasDesc, reluDesc;
-//         cudnnBackendDescriptor_t xDesc, wDesc, yDesc, bDesc, zDesc, aDesc;
-//         cudnnBackendDescriptor_t dxDesc, dwDesc, dyDesc, dbDesc, dzDesc, daDesc;
-//         cudnnBackendDescriptor_t convFprop, biasFprop, reluFprop, opGraph, engine, engCfg;
-//         cudnnBackendDescriptor_t convDataBprop, convFilterBprop, biasBprop, reluBprop;
-//         cudnnBackendDescriptor_t plan, bwdPlan, bwdOpGraph, bwdEngCfg, bwdEngine;
-//         cudnnBackendDescriptor_t varPack;
-//         cudnnBackendDescriptor_t heuristics, conv2Desc;
-        
-
-//         std::string _layer_name;
-//         int64_t _in_channels;
-//         int64_t _out_channels;
-//         int64_t _kernel_size;
-//         int64_t _stride;
-//         int64_t _padding;
-//         int64_t _dilation;    
-
-//         int64_t in_n, in_c, in_h, in_w;
-//         int64_t out_n, out_c, out_h, out_w;
-//         int64_t num_features;
-
-//         int64_t _fwd_workspace_size = 0;
-//         int64_t _bwd_workspace_size = 0;
-//         void *_fwd_workspace_d = nullptr;
-//         void *_bwd_workspace_d = nullptr;
-
-//         // For NHWC
-//         int64_t* input_dims3d_d = nullptr;
-//         int64_t* output_dims3d_d = nullptr;
-//         int64_t* permute_d = nullptr;
-//         void generateStrides(const int64_t* dimA, int64_t* strideA, int nbDims, cudnnTensorFormat_t filterFormat);
-
-//         // Get output_dims
-//         int getFwdConvDilatedFilterDim(int filterDim, int dilation);
-//         int getFwdConvPaddedImageDim(int tensorDim, int pad);
-//         int getFwdConvOutputDim(int tensorDim, int pad, int filterDim, int stride, int dilation);
-
-//         float* _NHWC_dx_d = nullptr;
-//         float* _NHWC_dy_d = nullptr;
-//         float* _act_input_d = nullptr;  //activation input used for BP
-//         float *_NHWC_output_d = nullptr;
-        
-//     public:
-//         Conv2dBiasReLU(std::string layer_name, int in_channels, int out_channels, int kernel_size, int stride=1, int padding=0, int dilation=1);
-//         virtual ImageDto Forward(ImageDto &data);
-//         virtual ImageDto Backward(ImageDto &data, int *labels);
-
-
-// };
-
 class Conv2D: public Layer
 {
     private:        
