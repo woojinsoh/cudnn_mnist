@@ -11,7 +11,7 @@ This implementation is written in the NGC container **PyTorch:22.10-py3** where 
 - CUBLAS: 11.11
 - CMake: 3.22.2
 
-respectively on **NVIDIA Ampere A100 GPU**. If you should use a different device compute capability such as from Volta, Turing, or etc, please modify the device value of `CMAKE_CUDA_ARCHITECTURES` variable in **CMakeLists.txt**.
+respectively on **NVIDIA Volta V100 GPU**. Please make sure the right device value of `CMAKE_CUDA_ARCHITECTURES`. It must be specified when executing `cmake` command.
 
 ## Architecture
 Basic Convolutional neural network architecture is considered(two Convolution layers with Bias, two ReLU, Pooling, Dense layers, and one Softmax layer). Details are shown in the below picture. 
@@ -40,7 +40,7 @@ Most of layers are implemented using the cuDNN library. Note that the second Con
     ```sh
     $ mkdir -p build
     $ cd build 
-    $ cmake ..
+    $ cmake -DSM={your SM number} ..
     $ make
     ```
 5. Run
@@ -66,17 +66,17 @@ MNIST dataset is successfully loaded.
 
 [Model Architecture]
 FWD:: [Layer Name:: conv1_and_bias]
->> Convolution input shape:: 256 x 1 x 28 x 28
->> Convolution output shape:: 256 x 32 x 24 x 24
+>> Convolution input shape:: 128 x 1 x 28 x 28
+>> Convolution output shape:: 128 x 32 x 24 x 24
 
 >> Searching for the fastest convolution algorithm ... 
    >> FWD algorithm
    ===== CUDNN_STATUS_SUCCESS for Algo 1: -1.000000 time requiring 7808 memory
    ===== CUDNN_STATUS_SUCCESS for Algo 0: -1.000000 time requiring 0 memory
-   ===== CUDNN_STATUS_SUCCESS for Algo 2: -1.000000 time requiring 0 memory
-   ===== CUDNN_STATUS_SUCCESS for Algo 5: -1.000000 time requiring 36904960 memory
-   ===== CUDNN_STATUS_SUCCESS for Algo 4: -1.000000 time requiring 71306368 memory
-   ===== CUDNN_STATUS_SUCCESS for Algo 7: -1.000000 time requiring 51419264 memory
+   ===== CUDNN_STATUS_SUCCESS for Algo 2: -1.000000 time requiring 7372800 memory
+   ===== CUDNN_STATUS_SUCCESS for Algo 5: -1.000000 time requiring 18522112 memory
+   ===== CUDNN_STATUS_SUCCESS for Algo 4: -1.000000 time requiring 35654784 memory
+   ===== CUDNN_STATUS_SUCCESS for Algo 7: -1.000000 time requiring 25720448 memory
    ===== CUDNN_STATUS_NOT_SUPPORTED for Algo 6: -1.000000 time requiring 0 memory
    ===== CUDNN_STATUS_NOT_SUPPORTED for Algo 3: -1.000000 time requiring 0 memory
    >> Fastest FWD algorithm:: Algo 1
@@ -85,9 +85,9 @@ FWD:: [Layer Name:: conv1_and_bias]
    >> BWD Filter algorithm
    ===== CUDNN_STATUS_SUCCESS for Algo 0: -1.000000 time requiring 0 memory
    ===== CUDNN_STATUS_SUCCESS for Algo 3: -1.000000 time requiring 0 memory
-   ===== CUDNN_STATUS_SUCCESS for Algo 1: -1.000000 time requiring 22312751 memory
-   ===== CUDNN_STATUS_SUCCESS for Algo 2: -1.000000 time requiring 92405760 memory
-   ===== CUDNN_STATUS_SUCCESS for Algo 5: -1.000000 time requiring 51419264 memory
+   ===== CUDNN_STATUS_SUCCESS for Algo 5: -1.000000 time requiring 25720448 memory
+   ===== CUDNN_STATUS_SUCCESS for Algo 1: -1.000000 time requiring 9363 memory
+   ===== CUDNN_STATUS_SUCCESS for Algo 2: -1.000000 time requiring 46202880 memory
    ===== CUDNN_STATUS_NOT_SUPPORTED for Algo 6: -1.000000 time requiring 0 memory
    ===== CUDNN_STATUS_NOT_SUPPORTED for Algo 4: -1.000000 time requiring 0 memory
    >> Fastest BWD Filter algorithm:: Algo 0
@@ -95,76 +95,75 @@ FWD:: [Layer Name:: conv1_and_bias]
 
    >> BWD Data algorithm
    ===== CUDNN_STATUS_SUCCESS for Algo 0: -1.000000 time requiring 0 memory
-   ===== CUDNN_STATUS_SUCCESS for Algo 1: -1.000000 time requiring 22098448 memory
-   ===== CUDNN_STATUS_SUCCESS for Algo 3: -1.000000 time requiring 36904960 memory
-   ===== CUDNN_STATUS_SUCCESS for Algo 2: -1.000000 time requiring 71584896 memory
-   ===== CUDNN_STATUS_SUCCESS for Algo 5: -1.000000 time requiring 91395200 memory
+   ===== CUDNN_STATUS_SUCCESS for Algo 2: -1.000000 time requiring 35933312 memory
+   ===== CUDNN_STATUS_SUCCESS for Algo 3: -1.000000 time requiring 18522112 memory
+   ===== CUDNN_STATUS_SUCCESS for Algo 5: -1.000000 time requiring 45708416 memory
+   ===== CUDNN_STATUS_SUCCESS for Algo 1: -1.000000 time requiring 0 memory
    ===== CUDNN_STATUS_NOT_SUPPORTED for Algo 4: -1.000000 time requiring 0 memory
    >> Fastest Bwd Data Algorithm:: Algo 0
    >> Memory Buffer size required:: 0
 
 FWD:: [Layer Name:: act1_relu]
->> Activation input shape:: 256 x 32 x 24 x 24
->> Activation output shape:: 256 x 32 x 24 x 24
+>> Activation input shape:: 128 x 32 x 24 x 24
+>> Activation output shape:: 128 x 32 x 24 x 24
 
 FWD:: [Layer Name:: pool1_max]
->> Pooling input shape:: 256 x 32 x 24 x 24
->> Pooling output shape:: 256 x 32 x 12 x 12
+>> Pooling input shape:: 128 x 32 x 24 x 24
+>> Pooling output shape:: 128 x 32 x 12 x 12
 
 Backend API fused kernel FWD:: [Layer Name:: conv2_and_bias_and_relu]
 >> Input layout conversion:: from NCHW to NHWC.
->> Convolution input shape(NHWC):: 256 x 12 x 12 x 32
->> Convolution output shape(NHWC):: 256 x 8 x 8 x 64
->> BiasAdd output shape(NHWC):: 256 x 8 x 8 x 64
->> Activation output shape(NHWC):: 256 x 8 x 8 x 64
+>> Copy inputs:: from FP32 to FP16.
+>> Copy weights/biases:: from FP32 to FP16.
+>> Convolution input shape(NHWC):: 128 x 12 x 12 x 32
+>> Convolution output shape(NHWC):: 128 x 8 x 8 x 64
+>> BiasAdd output shape(NHWC):: 128 x 8 x 8 x 64
+>> Activation output shape(NHWC):: 128 x 8 x 8 x 64
+>> Conv/Bias/Activation Done:: with FP16
 
+>> Copy outputs:: from FP16 to FP32
 >> Output layout conversion:: from NHWC to NCHW
->> Activation output shape(NCHW):: 256 x 64 x 8 x 8
+>> Activation output shape(NCHW):: 128 x 64 x 8 x 8
 
 FWD:: [Layer Name:: pool2_max]
->> Pooling input shape:: 256 x 64 x 8 x 8
->> Pooling output shape:: 256 x 64 x 4 x 4
+>> Pooling input shape:: 128 x 64 x 8 x 8
+>> Pooling output shape:: 128 x 64 x 4 x 4
 
 FWD:: [Layer Name:: dense1_and_bias]
->> Dense input shape:: 256 x 1024
->> Dense output shape:: 256 x 100
+>> Dense input shape:: 128 x 1024
+>> Dense output shape:: 128 x 100
 
 FWD:: [Layer Name:: dense2_and_bias]
->> Dense input shape:: 256 x 100
->> Dense output shape:: 256 x 10
+>> Dense input shape:: 128 x 100
+>> Dense output shape:: 128 x 10
 
 FWD:: [Layer Name:: softmax]
->> Softmax input shape:: 256 x 10
->> Softmax output shape:: 256 x 10
+>> Softmax input shape:: 128 x 10
+>> Softmax output shape:: 128 x 10
 
 [Start training]
-Num iterations:: 2500
-Batch size:: 256
-At iteration    0,    Expected Loss:: 3.4237    Accuracy to the current batch:: 0.0742
-At iteration  100,    Expected Loss:: 1.3220    Accuracy to the current batch:: 0.5977
-At iteration  200,    Expected Loss:: 0.9896    Accuracy to the current batch:: 0.7383
-At iteration  300,    Expected Loss:: 0.8994    Accuracy to the current batch:: 0.7539
-At iteration  400,    Expected Loss:: 0.7969    Accuracy to the current batch:: 0.7695
-At iteration  500,    Expected Loss:: 0.6206    Accuracy to the current batch:: 0.8359
-At iteration  600,    Expected Loss:: 0.5668    Accuracy to the current batch:: 0.8359
-At iteration  700,    Expected Loss:: 0.2187    Accuracy to the current batch:: 0.9727
-At iteration  800,    Expected Loss:: 0.4717    Accuracy to the current batch:: 0.8633
-At iteration  900,    Expected Loss:: 0.4075    Accuracy to the current batch:: 0.8984
-At iteration 1000,    Expected Loss:: 0.3614    Accuracy to the current batch:: 0.9141
-At iteration 1100,    Expected Loss:: 0.3578    Accuracy to the current batch:: 0.9102
-At iteration 1200,    Expected Loss:: 0.2633    Accuracy to the current batch:: 0.9102
-At iteration 1300,    Expected Loss:: 0.4409    Accuracy to the current batch:: 0.8633
-At iteration 1400,    Expected Loss:: 0.3402    Accuracy to the current batch:: 0.9062
-At iteration 1500,    Expected Loss:: 0.2960    Accuracy to the current batch:: 0.8945
-At iteration 1600,    Expected Loss:: 0.2287    Accuracy to the current batch:: 0.9375
-At iteration 1700,    Expected Loss:: 0.3581    Accuracy to the current batch:: 0.9023
-At iteration 1800,    Expected Loss:: 0.3573    Accuracy to the current batch:: 0.9102
-At iteration 1900,    Expected Loss:: 0.3279    Accuracy to the current batch:: 0.9180
-At iteration 2000,    Expected Loss:: 0.3601    Accuracy to the current batch:: 0.8750
-At iteration 2100,    Expected Loss:: 0.2418    Accuracy to the current batch:: 0.9375
-At iteration 2200,    Expected Loss:: 0.1992    Accuracy to the current batch:: 0.9570
-At iteration 2300,    Expected Loss:: 0.2963    Accuracy to the current batch:: 0.9102
-At iteration 2400,    Expected Loss:: 0.3377    Accuracy to the current batch:: 0.8867
+Num iterations:: 2000
+Batch size:: 128
+At iteration    0,    Expected Loss:: 3.5131    Accuracy to the current batch:: 0.0469
+At iteration  100,    Expected Loss:: 1.5796    Accuracy to the current batch:: 0.5156
+At iteration  200,    Expected Loss:: 0.9891    Accuracy to the current batch:: 0.7344
+At iteration  300,    Expected Loss:: 0.7754    Accuracy to the current batch:: 0.8203
+At iteration  400,    Expected Loss:: 0.7836    Accuracy to the current batch:: 0.7812
+At iteration  500,    Expected Loss:: 0.6714    Accuracy to the current batch:: 0.8125
+At iteration  600,    Expected Loss:: 0.8184    Accuracy to the current batch:: 0.7734
+At iteration  700,    Expected Loss:: 0.5289    Accuracy to the current batch:: 0.8516
+At iteration  800,    Expected Loss:: 0.5872    Accuracy to the current batch:: 0.8516
+At iteration  900,    Expected Loss:: 0.3770    Accuracy to the current batch:: 0.9141
+At iteration 1000,    Expected Loss:: 0.4165    Accuracy to the current batch:: 0.8750
+At iteration 1100,    Expected Loss:: 0.5315    Accuracy to the current batch:: 0.8281
+At iteration 1200,    Expected Loss:: 0.2988    Accuracy to the current batch:: 0.9375
+At iteration 1300,    Expected Loss:: 0.5029    Accuracy to the current batch:: 0.8359
+At iteration 1400,    Expected Loss:: 0.1487    Accuracy to the current batch:: 0.9688
+At iteration 1500,    Expected Loss:: 0.2985    Accuracy to the current batch:: 0.9297
+At iteration 1600,    Expected Loss:: 0.4961    Accuracy to the current batch:: 0.8750
+At iteration 1700,    Expected Loss:: 0.3613    Accuracy to the current batch:: 0.9062
+At iteration 1800,    Expected Loss:: 0.6173    Accuracy to the current batch:: 0.8125
+At iteration 1900,    Expected Loss:: 0.2433    Accuracy to the current batch:: 0.9688
 
 [Load test dataset]
 Load MNIST images from ../dataset/t10k-images-idx3-ubyte
@@ -176,7 +175,7 @@ MNIST dataset is successfully loaded.
 
 [Start inferencing]
 9984 images are used for inference.
-Total inference accuracy:: 0.9316
+Total inference accuracy:: 0.9126
 
 [Finished]
 ```
