@@ -105,9 +105,7 @@ float Model::Accuracy(ImageDto &data, int *labels_d, int num_classes)
 {
     if(accuracy == nullptr) checkCUDA(cudaMallocManaged(&accuracy, sizeof(float)));
     *accuracy = 0.f;
-
-    calAccuracy<<<1, data.batch_size, data.batch_size>>>(data.batch_size, num_classes, data.buffer_d, labels_d, accuracy); // batchsize should be better for multiple of 32, and less than 2048.
+    calAccuracy<<<1, data.batch_size, data.batch_size*sizeof(int)>>>(data.batch_size, num_classes, data.buffer_d, labels_d, accuracy); // batchsize should be better for multiple of 32, and less than 2048.
     checkCUDA(cudaDeviceSynchronize());
-
     return *accuracy;
 }
