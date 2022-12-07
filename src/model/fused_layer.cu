@@ -4,6 +4,7 @@
 
 #include "fused_layer.h"
 #include "utils.h"
+#include "fp16_dev.h"
 
 Conv2dBiasReLU::Conv2dBiasReLU(std::string layer_name, int in_channels, int out_channels, int kernel_size, int stride, int padding, int dilation):_layer_name(layer_name), _in_channels(in_channels), _out_channels(out_channels), _kernel_size(kernel_size), _stride(stride), _padding(padding), _dilation(dilation){
     initWeightBias(1, _layer_name, _in_channels, _out_channels, _kernel_size); // Initialize weight and bias
@@ -50,7 +51,7 @@ void Conv2dBiasReLU::setCudnnBackendFwdDescriptors(){
     //////////////////////////////
     /*1. Set tensor descriptors */
     //////////////////////////////                   
-    cudnnDataType_t dtype = CUDNN_DATA_FLOAT;
+    cudnnDataType_t dtype = CUDNN_DATA_HALF; //TensorCore is mandatory for runtime fusion. So, FP16 might be required unless Ampere.
     int64_t alignment = 16; //16B alighment is needed to run a tensor core engine
 
     //x
@@ -131,7 +132,7 @@ void Conv2dBiasReLU::setCudnnBackendFwdDescriptors(){
     int64_t yDim[] = {out_n, out_c, out_h, out_w};
     int64_t yStr[4];
     int64_t yUid = 'y';
-    if(info_flag) printf(">> Activation output shape(NHWC):: %ld x %ld x %ld x %ld\n\n", out_n, out_h, out_w, out_c);
+    if(info_flag) printf(">> Activation output shape(NHWC):: %ld x %ld x %ld x %ld\n", out_n, out_h, out_w, out_c);
     generateStrides(yDim, yStr, 4, CUDNN_TENSOR_NHWC);   
     checkCUDNN(cudnnBackendCreateDescriptor(CUDNN_BACKEND_TENSOR_DESCRIPTOR, &yDesc));
     checkCUDNN(cudnnBackendSetAttribute(yDesc, CUDNN_ATTR_TENSOR_DATA_TYPE, CUDNN_TYPE_DATA_TYPE, 1, &dtype));
@@ -252,13 +253,14 @@ void Conv2dBiasReLU::setCudnnBackendFwdDescriptors(){
     checkCUDA(cudaMalloc(&_fwd_workspace_d, _fwd_workspace_size * sizeof(float)));
 
     // Set NHWC layout output 
-    if(_fusion_output_d == nullptr) checkCUDA(cudaMalloc(&_fusion_output_d, sizeof(float) * out_n * out_c * out_h * out_w));
-    if(_after_conv_bias_d == nullptr) checkCUDA(cudaMalloc(&_after_conv_bias_d, sizeof(float) * out_n * out_c * out_h * out_w));
+    if(_fusion_output_fp16_d == nullptr) checkCUDA(cudaMalloc(&_fusion_output_fp16_d, sizeof(half1) * out_n * out_c * out_h * out_w));
+    if(_after_conv_bias_fp16_d == nullptr) checkCUDA(cudaMalloc(&_after_conv_bias_fp16_d, sizeof(half1) * out_n * out_c * out_h * out_w));
 
     // Set Variant pack
     /* CUDNN: This is the ordering of the pointers. 
        Here, _weight_d, _bias_d are considered as NHWC layout.*/
-    void *devPtrs[] = {_input_d, _after_conv_bias_d, _fusion_output_d, _weight_d, _bias_d}; 
+
+    void *devPtrs[] = {_input_fp16_d, _after_conv_bias_fp16_d, _fusion_output_fp16_d, _weight_fp16_d, _bias_fp16_d}; 
     int64_t uids[] = {'x', 'a', 'y', 'w', 'b'};  
     checkCUDNN((cudnnBackendCreateDescriptor(CUDNN_BACKEND_VARIANT_PACK_DESCRIPTOR, &varPack)));
     checkCUDNN(cudnnBackendSetAttribute(varPack, CUDNN_ATTR_VARIANT_PACK_DATA_POINTERS, CUDNN_TYPE_VOID_PTR, 5, devPtrs));
@@ -574,7 +576,7 @@ void Conv2dBiasReLU::setCudnnBackendBwdDescriptors(){
     checkCUDA(cudaMalloc(&_dConvFilter_workspace_d, dConvFilterworkspace_size * sizeof(float))); 
 
     // Set Variant Packs
-    void *dReluDataPtrs[] = {_dy_d, _after_conv_bias_d, _da_d};
+    void *dReluDataPtrs[] = {_dy_d, _after_conv_bias_fp16_d, _da_d};
     int64_t dReluUids[] = {dyUid, aUid, daUid};
     checkCUDNN((cudnnBackendCreateDescriptor(CUDNN_BACKEND_VARIANT_PACK_DESCRIPTOR, &dReluVarPack)));
     checkCUDNN(cudnnBackendSetAttribute(dReluVarPack, CUDNN_ATTR_VARIANT_PACK_DATA_POINTERS, CUDNN_TYPE_VOID_PTR, 3, dReluDataPtrs));
@@ -630,7 +632,9 @@ ImageDto Conv2dBiasReLU::Forward(ImageDto &input){
     }
 
     if(_input_h == nullptr) _input_h = (float*)malloc(sizeof(float) * in_n * in_c * in_h * in_w);
-    if(_input_d == nullptr) checkCUDA(cudaMalloc(&_input_d, sizeof(float) * in_n * in_c * in_h * in_w));
+    if(_input_fp16_h == nullptr) _input_fp16_h = (half1*)malloc(sizeof(float) * in_n * in_c * in_h * in_w);
+    if(_input_d == nullptr) checkCUDA(cudaMalloc(&_input_d, sizeof(float) * in_n * in_c * in_h * in_w));    
+    if(_input_fp16_d == nullptr) checkCUDA(cudaMalloc(&_input_fp16_d, sizeof(half1) * in_n * in_c * in_h * in_w));
 
     // Convert from NCHW into NHWC
     int64_t nthreads = 512;
@@ -639,9 +643,27 @@ ImageDto Conv2dBiasReLU::Forward(ImageDto &input){
     checkCUDA(cudaDeviceSynchronize());
     if(info_flag) std::cout << ">> Input layout conversion:: from NCHW to NHWC." << std::endl;  
 
+    /* FP32 to FP 16 */
+    // Copy input from FP32 to FP16
+    gpu_float2half_rn(in_n*in_c*in_h*in_w, _input_d, _input_fp16_d);
+    checkCUDA(cudaDeviceSynchronize());
+    if(info_flag) std::cout << ">> Copy inputs:: from FP32 to FP16." << std::endl;  
+
+    // Copy weights from FP32 to FP16'
+    if(_weight_fp16_d == nullptr) checkCUDA(cudaMalloc(&_weight_fp16_d, sizeof(half1) * _out_channels * _in_channels * _kernel_size * _kernel_size));
+    gpu_float2half_rn(_out_channels * _in_channels * _kernel_size * _kernel_size, _weight_d, _weight_fp16_d);
+    checkCUDA(cudaDeviceSynchronize());
+
+    // Copy biases from FP32 to FP16'
+    if(_bias_fp16_d == nullptr) checkCUDA(cudaMalloc(&_bias_fp16_d, sizeof(half1) * _out_channels));
+    gpu_float2half_rn(_out_channels, _weight_d, _weight_fp16_d);
+    checkCUDA(cudaDeviceSynchronize());
+    if(info_flag) std::cout << ">> Copy weights/biases:: from FP32 to FP16." << std::endl;  
+
     // Persist input
     checkCUDA(cudaMemcpy(_input_h, _input_d, sizeof(float) * in_n * in_c * in_h * in_w, cudaMemcpyDeviceToHost));
-    
+    checkCUDA(cudaMemcpy(_input_fp16_h, _input_fp16_d, sizeof(half1) * in_n * in_c * in_h * in_w, cudaMemcpyDeviceToHost));
+        
     // Free input DTO memory
     free(input.buffer_h);
     checkCUDA(cudaFree(input.buffer_d));
@@ -654,6 +676,15 @@ ImageDto Conv2dBiasReLU::Forward(ImageDto &input){
 
     // Execution
     checkCUDNN(cudnnBackendExecute(cudnnHandle, plan, varPack));
+    if(info_flag) std::cout << ">> Conv/Bias/Activation Done:: with FP16\n" << std::endl;  
+
+
+    // Copy output back from FP16 to FP32
+    if(_output_d == nullptr) checkCUDA(cudaMalloc(&(_output_d), sizeof(float) * (out_n * out_c * out_h * out_w))); 
+    gpu_half2float(out_n * out_c * out_h * out_w, _fusion_output_fp16_d, _output_d);
+    checkCUDA(cudaDeviceSynchronize());
+    if(info_flag) std::cout << ">> Copy outputs:: from FP16 to FP32" << std::endl;  
+
 
     // Set output DTO
     ImageDto output = ImageDto(out_n, out_c, out_h, out_w);
@@ -668,7 +699,7 @@ ImageDto Conv2dBiasReLU::Forward(ImageDto &input){
     }
     
     nblocks = ceil((double)(out_n*out_c*out_h*out_w)/nthreads); 
-    permute3dTensorsKernel<<<nblocks, nthreads>>>(_fusion_output_d, output_dims3d_d, permute_d, output.buffer_d);
+    permute3dTensorsKernel<<<nblocks, nthreads>>>(_output_d, output_dims3d_d, permute_d, output.buffer_d);
     checkCUDA(cudaDeviceSynchronize());
     if(info_flag) std::cout << ">> Output layout conversion:: from NHWC to NCHW" << std::endl;  
     if(info_flag) printf(">> Activation output shape(NCHW):: %ld x %ld x %ld x %ld\n\n", out_n, out_c, out_h, out_w);
@@ -677,6 +708,10 @@ ImageDto Conv2dBiasReLU::Forward(ImageDto &input){
     if(_output_h == nullptr) _output_h = new float[out_n * out_c * out_h * out_w];    
     checkCUDA(cudaMemcpy(_output_h, output.buffer_d, sizeof(float) * (out_n * out_c * out_h * out_w), cudaMemcpyDeviceToHost));
     checkCUDA(cudaMemcpy(output.buffer_h, output.buffer_d, sizeof(float) * (out_n * out_c * out_h * out_w), cudaMemcpyDeviceToHost));
+
+    // for(int i=0; i<out_n * out_c * out_h * out_w; i++){
+    //     printf("%f ", output.buffer_h[i]);
+    // }
 
     return output;
 }
@@ -688,6 +723,7 @@ ImageDto Conv2dBiasReLU::Backward(ImageDto &dy, int *labels){
     // Set dW
     if(_grad_weight_h == nullptr) _grad_weight_h = (float*)malloc(sizeof(float) * (_out_channels * _kernel_size * _kernel_size * _in_channels));
     if(_grad_weight_d == nullptr) checkCUDA(cudaMalloc(&_grad_weight_d, sizeof(float) * (_out_channels * _kernel_size * _kernel_size * _in_channels)));
+
     
     // Set db
     if(_grad_bias_h == nullptr) _grad_bias_h = (float*)malloc(sizeof(float) *_out_channels);
