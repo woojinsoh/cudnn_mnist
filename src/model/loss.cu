@@ -1,5 +1,5 @@
 #include "loss.h"
-
+#include <iostream>
 /////////////////////////////////////
 //* CrossEntropyLoss from softmax *//
 /////////////////////////////////////
@@ -50,20 +50,22 @@ __global__ void calAccuracy(int batch_size, int num_classes, float *softmax, int
     
     float max_value = -1000000;
     int num_trues = 0;
-    int idx = threadIdx.x;   //batch_size
-    for(int i=idx*num_classes; i<(idx+1)*num_classes; i++){   
-        if(max_value < softmax[i]){
-            max_value = softmax[i];
-            prediction[idx] = (int)(i % num_classes);
-        } 
-    }
-    __syncthreads();
-
-    // reduction to max
-    if(idx == 0){
-        for(int i=0; i<batch_size; i++){
-            if(prediction[i]==labels[i]) num_trues++;
+    int idx = blockDim.x * blockIdx.x + threadIdx.x;
+    if(idx < batch_size * num_classes){
+        for(int i=idx*num_classes; i<(idx+1)*num_classes; i++){   
+            if(max_value < softmax[i]){
+                max_value = softmax[i];
+                prediction[idx] = (int)(i % num_classes);
+            } 
         }
-        *accuracy = (float)num_trues/batch_size;
+        __syncthreads();
+
+        // reduction to max
+        if(idx == 0){
+            for(int i=0; i<batch_size; i++){
+                if(prediction[i]==labels[i]) num_trues++;
+            }
+            *accuracy = (float)num_trues/batch_size;
+        }
     }
 }
