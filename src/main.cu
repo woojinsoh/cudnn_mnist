@@ -119,15 +119,16 @@ void MNIST::get_next_batch(int batch_size, float* batch_imgs, int* batch_labels)
         // print_imgs(batch_size, batch_imgs, batch_labels);
     }
     else{
-        if(n_batch * batch_num_pixels == total_num_pixels){
-            printf("All data is exhausted. Start loading from the beginning again.\n");
-            n_batch = 0;
+        // printf("All data is exhausted. Start loading from the beginning again.\n");
+        if(n_batch * batch_num_pixels == total_num_pixels){            
+            copy(image_data.begin() + n_batch * batch_num_pixels, image_data.begin() + (n_batch + 1) * batch_num_pixels, batch_imgs);
+            copy(label_data.begin() + n_batch * batch_size, label_data.begin() + (n_batch + 1) * batch_size, batch_labels);
         }
         else{
             copy(image_data.begin() + n_batch * batch_num_pixels, image_data.end(), batch_imgs);
             copy(label_data.begin() + n_batch * batch_size, label_data.end(), batch_labels);
-            n_batch = 0;
         }
+        n_batch = 0;
     }
 };
 
@@ -136,7 +137,7 @@ MNIST::MNIST():n_batch(0), batch_num_pixels(0), total_num_pixels(0){};
 int main(int argc, char *argv[])
 {
     // MNIST info
-    int batch_size = 256;
+    int batch_size = 128;
     int num_channels = 1;
     int num_classes = 10;
 
@@ -172,8 +173,8 @@ int main(int argc, char *argv[])
     model.addLayers(new Activation("act1_relu", CUDNN_ACTIVATION_RELU));
     model.addLayers(new Pooling("pool1_max", 2, 2, 0, CUDNN_POOLING_MAX));    
 
-    // model.addLayers(new Conv2D("conv2_and_bias", 32, 64, 5, 1, 0, 1));           // with CUDNN
-    // model.addLayers(new Activation("act2_relu", CUDNN_ACTIVATION_RELU));         // with CUDNN
+    //  model.addLayers(new Conv2D("conv2_and_bias", 32, 64, 5, 1, 0, 1));           // with CUDNN
+    //  model.addLayers(new Activation("act2_relu", CUDNN_ACTIVATION_RELU));         // with CUDNN
     model.addLayers(new Conv2dBiasReLU("conv2_and_bias_and_relu", 32, 64, 5, 1, 0, 1));   // with CUDNN Backend APIs
     model.addLayers(new Pooling("pool2_max", 2, 2, 0, CUDNN_POOLING_MAX));
     
@@ -184,7 +185,7 @@ int main(int argc, char *argv[])
     std::cout << "\n[Model Architecture]" << std::endl;
     
     // Training loop
-    int num_steps = 2500;    
+    int num_steps = 2000;    
     for(int i=0;i<num_steps;i++){
         data.buffer_h = (float*)malloc(sizeof(float) * (batch_size * num_channels * mnist.n_rows * mnist.n_cols));  // imgs
         mnist.get_next_batch(data.batch_size, data.buffer_h, labels_h);        
@@ -194,6 +195,7 @@ int main(int argc, char *argv[])
         checkCUDA(cudaMemcpy(onehot_labels_d, onehot_labels_h, sizeof(int) * batch_size * num_classes, cudaMemcpyHostToDevice));
         
         ImageDto forward_output = model.Forward(data);
+        
         if(i==0) {
             std::cout << "[Start training]" << std::endl;
             std::cout << "Num iterations:: " << num_steps << std::endl;
@@ -201,7 +203,7 @@ int main(int argc, char *argv[])
         }
         if(i % 100 == 0){
             *loss = model.Loss(forward_output, onehot_labels_d, softmax_algo);
-            *accuracy = model.Accuracy(forward_output, labels_d, num_classes);
+            *accuracy = model.Accuracy(forward_output, labels_d, num_classes); //need to check this part. error
             std::cout << "At iteration " << std::right << std::setw(4) << i << \
                          ",    Expected Loss:: " << std::fixed << std::setprecision(4) << *loss << \
                          "    Accuracy to the current batch:: " << std::fixed << std::setprecision(4) << *accuracy << \
